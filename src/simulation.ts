@@ -2,27 +2,40 @@ export type SimulationMode = 'automatic' | 'manual'
 export type IOType = 'Teclado' | 'Disco' | 'Red' | 'Impresora'
 export type EventKind = 'READY' | 'CPU' | 'TICK' | 'E/S' | 'E/S COMPLETA' | 'FIN' | 'IDLE'
 export type ProcessState = 'ready' | 'running' | 'blocked'
+
 export interface Process {
   pid: number; name: string; state: ProcessState; total: number; remaining: number
   ioType?: IOType; arrival: number; quantumUsed: number; ioAt: number | null; ioDuration: number; ioRemaining: number
 }
+
 export interface Simulation {
   processes: Process[]; tick: number; completed: number; busyTicks: number; nextPid: number
   mode: SimulationMode; notice: string; seed: number; quantum: number; active: boolean; automatic: boolean; speed: number
   timeline: { tick: number; pid: number | null }[]
   events: { tick: number; text: string; kind: EventKind }[]
 }
+
 export const MAX_PROCESSES = 15
-const names = ['chrome.exe', 'systemd', 'node', 'python', 'worker', 'terminal', 'code', 'postgres']
-/** Advances the stored PRNG seed, keeping reducer updates deterministic and replayable. */
+const names = ['chrome.exe', 'systemd', 'node', 'python', 'worker', 'terminal', 'code', 'postgres', 'docker']
+
+/**
+ * Avanza la semilla del generador seudorrandómico.
+ * Mantiene las actualizaciones del reducer deterministas y reproducibles.
+ */
 function random(state: Simulation) {
   state.seed = (Math.imul(state.seed, 1664525) + 1013904223) >>> 0
-  return state.seed / 4294967296
+  return state.seed / 4294967296 // 2 elevado a 32
 }
+
+/** Registra un evento reciente en el historial de la simulación. */
 function event(state: Simulation, text: string, kind: EventKind = 'READY') {
   state.events = [{ tick: state.tick, text, kind }, ...state.events].slice(0, 10)
 }
-/** Adds one randomly generated Ready process to an owned draft, respecting the active cap. */
+
+/**
+ * Añade un proceso aleatorio directamente al estado Lista.
+ * Respeta el límite de procesos activos y registra la llegada en el historial.
+ */
 export function createRandomProcess(state: Simulation) {
   if (state.processes.length >= MAX_PROCESSES) return
   const total = 4 + Math.floor(random(state) * 15)
@@ -35,22 +48,34 @@ export function createRandomProcess(state: Simulation) {
   state.processes.push(process)
   event(state, `PID ${process.pid} → Lista · nuevo proceso`)
 }
-/** Creates a fresh paused session with 5–8 processes and empty metrics/history. */
+
+/** Crea una sesión pausada con 5–8 procesos iniciales y métricas vacías. */
 export function resetSimulation(seed: number): Simulation {
-  const state: Simulation = { processes: [], tick: 0, completed: 0, busyTicks: 0,
-    nextPid: 101, mode: 'automatic', notice: '', seed, quantum: 3, active: false, automatic: false, speed: 1, timeline: [], events: [] }
+  const state: Simulation = {
+    processes: [], tick: 0, completed: 0, busyTicks: 0,
+    nextPid: 101, mode: 'automatic', notice: '', seed, quantum: 3, active: false, automatic: false, speed: 1, timeline: [], events: []
+  }
   const count = 5 + Math.floor(random(state) * 4)
   for (let i = 0; i < count; i++) createRandomProcess(state)
   return state
 }
-/** Moves a process to the queue tail. Array order is the Ready FIFO order. */
+
+/**
+ * Mueve un proceso al final de la cola FIFO de Lista y reinicia su quantum usado.
+ * Se usa al agotar el quantum o al completar una E/S; nunca lo pasa directamente
+ * a Ejecutando. Si el destino es Bloqueado, la CPU queda libre para otro despacho.
+ */
 function transitionProcess(state: Simulation, process: Process, target: ProcessState, reason: string) {
   process.state = target
   process.quantumUsed = 0
   state.processes = [...state.processes.filter(p => p.pid !== process.pid), process]
   event(state, `PID ${process.pid} → ${target === 'ready' ? 'Lista' : 'Bloqueado'} · ${reason}`, target === 'blocked' ? 'E/S' : reason === 'E/S completada' ? 'E/S COMPLETA' : 'READY')
 }
-/** Dispatches the first Ready process only if CPU is free; does not consume CPU time. */
+
+/**
+ * Mueve el primer proceso de Lista a Ejecutando cuando la CPU está libre.
+ * El despacho no consume CPU: el tick se consume en `advanceSimulation()`.
+ */
 export function scheduleNextProcess(state: Simulation) {
   if (state.processes.some(p => p.state === 'running')) return
   const next = state.processes.find(p => p.state === 'ready')
@@ -60,13 +85,15 @@ export function scheduleNextProcess(state: Simulation) {
     event(state, `PID ${next.pid} → Corriendo`, 'CPU')
   }
 }
+
 /**
- * Returns a new state after exactly one interval. CPU and already-blocked I/O advance
- * concurrently. Completion wins over I/O, which wins over quantum expiry. New I/O
- * begins on the next tick; arrivals/released processes join the FIFO tail. Gantt
- * Manual mode freezes I/O and arrivals, ignores scheduled I/O and dispatches only
- * at the start of the next CPU step. Both modes share the same scheduler. Gantt
- * records the process that actually consumed this interval, including IDLE.
+ * Devuelve el estado después de un tick exacto.
+ * En automático, la CPU y las E/S bloqueadas avanzan en paralelo. La prioridad
+ * es finalizar, después bloquear por E/S y por último devolver por quantum.
+ * Una E/S nueva comienza a descontarse en el siguiente tick; los procesos que
+ * regresan se añaden al final de Lista. En manual se congelan E/S y llegadas,
+ * pero se conserva este mismo planificador. El Gantt registra el PID ejecutado
+ * o `IDLE` si no hubo proceso Ejecutando.
  */
 export function advanceSimulation(previous: Simulation): Simulation {
   const state: Simulation = { ...previous, processes: previous.processes.map(p => ({ ...p })) }
@@ -75,10 +102,12 @@ export function advanceSimulation(previous: Simulation): Simulation {
   const manual = state.mode === 'manual'
   const blocked = manual ? [] : state.processes.filter(p => p.state === 'blocked')
   state.tick++
+
   for (const process of blocked) {
     process.ioRemaining--
     if (process.ioRemaining === 0) transitionProcess(state, process, 'ready', 'E/S completada')
   }
+
   if (running) {
     state.busyTicks++
     running.remaining--
@@ -99,6 +128,7 @@ export function advanceSimulation(previous: Simulation): Simulation {
       state.notice = 'Quantum agotado: proceso al final de Lista.'
     }
   }
+
   if (!running) {
     event(state, 'CPU sin procesos ejecutables.', 'IDLE')
     state.notice = 'CPU IDLE: completa una E/S o crea un proceso.'
@@ -108,11 +138,22 @@ export function advanceSimulation(previous: Simulation): Simulation {
   if (!manual) scheduleNextProcess(state)
   return state
 }
-/** Changes mode without resetting queues or work; both directions pause the clock. */
+
+/**
+ * Cambia entre modo automático y manual sin reiniciar procesos, colas ni métricas.
+ * El cambio pausa el reloj para que el usuario pueda continuar desde el mismo punto.
+ */
 export function setSimulationMode(state: Simulation, mode: SimulationMode): Simulation {
   return { ...state, mode, active: false, notice: mode === 'manual' ? 'Control manual: pulsa Espacio para ejecutar.' : 'Modo automático listo: pulsa Iniciar.' }
 }
-/** Requests user-controlled I/O on the running process, releasing CPU without dispatch. */
+
+/**
+ * Solicita E/S manual para el proceso Ejecutando.
+ * La tecla `I` o el botón correspondiente mueve Ejecutando a Bloqueado, asigna
+ * teclado, disco, red o impresora y libera la CPU. No despacha otro proceso en
+ * la misma acción: el siguiente Espacio o tick automático realiza ese despacho.
+ * Si no hay un proceso Ejecutando, no cambia el estado.
+ */
 export function requestProcessIO(state: Simulation): Simulation {
   if (state.mode !== 'manual' || !state.processes.some(p => p.state === 'running')) return state
   const next = { ...state, processes: state.processes.map(p => ({ ...p })) }
@@ -124,7 +165,13 @@ export function requestProcessIO(state: Simulation): Simulation {
   next.notice = 'CPU liberada: proceso esperando E/S.'
   return next
 }
-/** Completes only a currently blocked PID, returning it to FIFO Ready, never Running. */
+
+/**
+ * Completa la E/S de un PID Bloqueado.
+ * La tecla numérica o el botón mueve Bloqueado al final de Lista y reinicia su
+ * quantum usado; nunca lo mueve directamente a Ejecutando. El planificador decidirá
+ * cuándo recibe la CPU según la cola FIFO.
+ */
 export function completeProcessIO(state: Simulation, pid: number): Simulation {
   if (state.mode !== 'manual' || !state.processes.some(p => p.pid === pid && p.state === 'blocked')) return state
   const next = { ...state, processes: state.processes.map(p => ({ ...p })) }
@@ -134,12 +181,18 @@ export function completeProcessIO(state: Simulation, pid: number): Simulation {
   next.notice = 'Operación completada: proceso listo para ejecutarse.'
   return next
 }
+
 export type Action = { type: 'clock' | 'step' | 'toggle' | 'add' | 'automatic' | 'request-io' }
   | { type: 'mode'; value: SimulationMode }
   | { type: 'complete-io'; pid: number }
   | { type: 'complete-slot'; slot: number }
   | { type: 'speed' | 'quantum' | 'reset'; value: number }
-/** Single entry point for controls and timer; paused clock events are ignored. */
+
+/**
+ * Punto único para controles y reloj.
+ * En manual, `step` avanza un tick y las acciones de E/S son explícitas; en
+ * automático, `clock` solo avanza mientras la simulación está activa.
+ */
 export function simulationReducer(state: Simulation, action: Action): Simulation {
   switch (action.type) {
     case 'mode': return setSimulationMode(state, action.value)

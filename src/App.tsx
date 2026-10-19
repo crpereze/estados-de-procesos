@@ -7,9 +7,11 @@ import './App.css'
 
 const initialState = resetSimulation(Date.now() >>> 0)
 const labels = { ready: 'Lista', running: 'Corriendo', blocked: 'Bloqueado' }
+
 function ProcessCard({ process: p, quantum, active, manual, slot, onComplete, flashed }: { process: Process; quantum: number; active: boolean; manual: boolean; slot: number; onComplete: () => void; flashed: boolean }) {
   const IOIcon = { Teclado: Keyboard, Disco: HardDrive, Red: Globe, Impresora: Printer }[p.ioType ?? 'Disco']
   const progress = Math.round((p.total - p.remaining) / p.total * 100)
+
   return <article className={`process-card ${p.state} ${flashed ? 'cpu-flash' : ''}`}>
     <div className="card-top"><span className="pid">PID {p.pid}</span><span className="state-label"><i />{labels[p.state]}</span></div>
     <h3><Terminal size={17} />{p.name}</h3>
@@ -22,23 +24,26 @@ function ProcessCard({ process: p, quantum, active, manual, slot, onComplete, fl
     <div className="arrival">Llegada T{String(p.arrival).padStart(3, '0')}{!manual && p.ioAt !== null && <span>E/S programada</span>}</div>
   </article>
 }
+
 function App() {
   const [state, dispatch] = useReducer(simulationReducer, initialState)
   const manual = state.mode === 'manual'
   const [pressed, setPressed] = useState('')
   const [flashedPid, setFlashedPid] = useState<number | null>(null)
+
   useEffect(() => {
     if (!state.active || manual) return
     const timer = window.setInterval(() => dispatch({ type: 'clock' }), 1000 / state.speed)
     return () => window.clearInterval(timer)
   }, [state.active, state.speed, manual])
+  
   useEffect(() => {
     if (!manual) return
     let releaseTimer: number | undefined
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target
       if (event.defaultPrevented || (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]')))) return
-      // Space on a focused button keeps its native activation, avoiding double actions.
+      // Espacio sobre un botón enfocado conserva su activación nativa y evita duplicar acciones.
       if (event.key === ' ' && target instanceof HTMLElement && target.closest('button, a, [role="button"]')) return
       const action = handleKeyboardCommand(event)
       if (!action) {
@@ -57,6 +62,7 @@ function App() {
       window.clearTimeout(releaseTimer)
     }
   }, [manual])
+
   useEffect(() => {
     if (!manual || !state.tick) return
     const pid = state.timeline.at(-1)?.pid ?? null
@@ -64,6 +70,7 @@ function App() {
     const timer = window.setTimeout(() => setFlashedPid(null), 250)
     return () => { window.cancelAnimationFrame(frame); window.clearTimeout(timer) }
   }, [manual, state.tick, state.timeline])
+
   const blockedProcesses = state.processes.filter(p => p.state === 'blocked')
   const hasRunning = state.processes.some(p => p.state === 'running')
   const ready = state.processes.filter(p => p.state === 'ready').length
@@ -77,6 +84,7 @@ function App() {
     { label: 'Uso acumulado CPU', value: `${usage}%`, Icon: Gauge, color: 'green' },
     { label: 'Tick actual', value: state.tick.toString().padStart(3, '0'), Icon: Timer, color: '' },
   ]
+  
   return <div className="app-shell">
     <header className="header"><div className="brand-icon"><Workflow size={23} /></div><div><h1>Process State Simulator</h1><p>Un vistazo al interior del sistema operativo</p></div><div className={`session-status ${state.active ? 'live' : ''}`} role="status"><i />{manual ? 'Laboratorio manual' : state.active ? 'Simulación activa' : 'Simulación pausada'}</div><span className="local-label">LOCAL ENGINE <span>v1.0</span></span></header>
     <main>

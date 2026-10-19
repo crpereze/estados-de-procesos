@@ -1,6 +1,10 @@
 import type { Action } from './simulation'
 
-/** Maps one fresh, unmodified keystroke to a reducer action. Callers exclude editable targets. */
+/**
+ * Traduce una pulsación nueva y sin modificadores a una acción del reducer.
+ * El componente excluye antes los campos editables. También se ignoran las
+ * repeticiones de una tecla para que mantenerla pulsada no ejecute muchos ticks.
+ */
 export function handleKeyboardCommand(event: {
   key: string; repeat: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean; isComposing: boolean
 }): Action | null {
