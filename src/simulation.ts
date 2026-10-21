@@ -19,6 +19,7 @@ export interface Process {
   pid: number; name: string; state: ProcessState; total: number; remaining: number
   ioType?: IOType; arrival: number; startedAt: number | null; finishedAt: number | null
   quantumUsed: number; ioAt: number | null; ioDuration: number; ioRemaining: number
+  history?: ProcessState[]
 }
 
 export interface Simulation {
@@ -35,9 +36,10 @@ const names = ['chrome.exe', 'systemd', 'node', 'python', 'worker', 'terminal', 
  * Transiciones permitidas del modelo de cinco estados.
  * Cualquier transición ausente de este mapa se rechaza; en particular un proceso
  * Terminado nunca puede volver a Listo, Bloqueado o Corriendo.
+ * Un proceso Nuevo puede ser admitido (Listo) o rechazado/abortado (Terminado).
  */
 const TRANSITIONS: Record<ProcessState, ProcessState[]> = {
-  new: ['ready'],
+  new: ['ready', 'terminated'],
   ready: ['running'],
   running: ['ready', 'blocked', 'terminated'],
   blocked: ['ready'],
@@ -78,7 +80,7 @@ export function createRandomProcess(state: Simulation) {
   const total = 4 + Math.floor(random(state) * 15)
   const process: Process = {
     pid: state.nextPid++, name: names[Math.floor(random(state) * names.length)],
-    state: 'new', total, remaining: total, arrival: state.tick, startedAt: null, finishedAt: null,
+    state: 'new', history: ['new'], total, remaining: total, arrival: state.tick, startedAt: null, finishedAt: null,
     quantumUsed: 0, ioAt: random(state) < 0.55 ? 1 + Math.floor(random(state) * (total - 1)) : null,
     ioDuration: 2 + Math.floor(random(state) * 4), ioRemaining: 0,
   }
@@ -105,13 +107,38 @@ export function resetSimulation(seed: number): Simulation {
  */
 function transitionProcess(state: Simulation, process: Process, target: ProcessState, reason: string, kind: EventKind) {
   if (!canTransition(process.state, target)) return false
+  const current = process.state
   process.state = target
+  process.history = [...(process.history ?? [current]), target]
   if (target === 'ready' || target === 'blocked') {
     process.quantumUsed = 0
     state.processes = [...state.processes.filter(p => p.pid !== process.pid), process]
   }
   event(state, `PID ${process.pid} → ${stateLabels[target]} · ${reason}`, kind)
   return true
+}
+
+/**
+ * Rechaza o cancela un proceso en estado Nuevo antes de su admisión.
+ * Ejecuta la transición válida Nuevo → Terminado (modelo de 5 estados).
+ */
+export function rejectProcess(state: Simulation, pid: number): Simulation {
+  const source = state.processes.find(p => p.pid === pid)
+  if (!source || source.state !== 'new') return state
+  const next: Simulation = {
+    ...state,
+    processes: state.processes.map(p => ({
+      ...p,
+      history: p.history ? [...p.history] : undefined,
+    })),
+  }
+  const process = next.processes.find(p => p.pid === pid)!
+  transitionProcess(next, process, 'terminated', 'creación cancelada / rechazo de admisión', 'FIN')
+  process.finishedAt = next.tick
+  process.remaining = 0
+  next.completed++
+  next.notice = `PID ${pid} cancelado: transición Nuevo → Terminado.`
+  return next
 }
 
 /**
@@ -122,7 +149,13 @@ function transitionProcess(state: Simulation, process: Process, target: ProcessS
 export function admitProcess(state: Simulation, pid: number): Simulation {
   const source = state.processes.find(p => p.pid === pid)
   if (!source || source.state !== 'new') return state
-  const next: Simulation = { ...state, processes: state.processes.map(p => ({ ...p })) }
+  const next: Simulation = {
+    ...state,
+    processes: state.processes.map(p => ({
+      ...p,
+      history: p.history ? [...p.history] : undefined,
+    })),
+  }
   const process = next.processes.find(p => p.pid === pid)!
   transitionProcess(next, process, 'ready', 'admitido a la cola de Listos', 'READY')
   next.notice = `PID ${pid} admitido: ahora está en ${stateLabels.ready}.`
@@ -140,6 +173,7 @@ export function scheduleNextProcess(state: Simulation) {
   if (next) {
     next.state = 'running'
     next.quantumUsed = 0
+    next.history = [...(next.history ?? ['ready']), 'running']
     event(state, `PID ${next.pid} → ${stateLabels.running}`, 'CPU')
   }
 }
@@ -151,7 +185,13 @@ export function scheduleNextProcess(state: Simulation) {
  * Si no hay proceso Corriendo, la CPU queda en IDLE.
  */
 export function advanceSimulation(previous: Simulation): Simulation {
-  const state: Simulation = { ...previous, processes: previous.processes.map(p => ({ ...p })) }
+  const state: Simulation = {
+    ...previous,
+    processes: previous.processes.map(p => ({
+      ...p,
+      history: p.history ? [...p.history] : undefined,
+    })),
+  }
   scheduleNextProcess(state)
   const running = state.processes.find(p => p.state === 'running')
   state.tick++
@@ -189,11 +229,18 @@ export function advanceSimulation(previous: Simulation): Simulation {
  */
 export function requestProcessIO(state: Simulation): Simulation {
   if (!state.processes.some(p => p.state === 'running')) return state
-  const next = { ...state, processes: state.processes.map(p => ({ ...p })) }
+  const next = {
+    ...state,
+    processes: state.processes.map(p => ({
+      ...p,
+      history: p.history ? [...p.history] : undefined,
+    })),
+  }
   const process = next.processes.find(p => p.state === 'running')!
   const types: IOType[] = ['Teclado', 'Disco', 'Red', 'Impresora']
   process.ioType = types[Math.floor(random(next) * types.length)]
   process.ioAt = null
+  process.ioDuration = 2 + Math.floor(random(next) * 4)
   process.ioRemaining = process.ioDuration
   transitionProcess(next, process, 'blocked', `esperando ${process.ioType.toLowerCase()}`, 'E/S')
   next.notice = 'CPU liberada: proceso esperando E/S.'
@@ -207,7 +254,13 @@ export function requestProcessIO(state: Simulation): Simulation {
 export function completeProcessIO(state: Simulation, pid: number): Simulation {
   const source = state.processes.find(p => p.pid === pid)
   if (!source || source.state !== 'blocked') return state
-  const next = { ...state, processes: state.processes.map(p => ({ ...p })) }
+  const next = {
+    ...state,
+    processes: state.processes.map(p => ({
+      ...p,
+      history: p.history ? [...p.history] : undefined,
+    })),
+  }
   const process = next.processes.find(p => p.pid === pid)!
   process.ioRemaining = 0
   transitionProcess(next, process, 'ready', 'E/S completada', 'E/S COMPLETA')
@@ -230,8 +283,8 @@ export function timingMetrics(state: Simulation): TimingMetrics {
   return { avgTurnaround: round(turnaround), avgResponse: round(response), avgWait: round(wait), finished: finished.length }
 }
 
-export type Action = { type: 'step' | 'add' | 'request-io' | 'admit-next' }
-  | { type: 'admit'; pid: number }
+export type Action = { type: 'step' | 'add' | 'request-io' | 'admit-next' | 'reject-next' }
+  | { type: 'admit' | 'reject'; pid: number }
   | { type: 'complete-io'; pid: number }
   | { type: 'complete-slot'; slot: number }
   | { type: 'quantum' | 'reset'; value: number }
@@ -247,9 +300,14 @@ export function simulationReducer(state: Simulation, action: Action): Simulation
     case 'request-io': return requestProcessIO(state)
     case 'complete-io': return completeProcessIO(state, action.pid)
     case 'admit': return admitProcess(state, action.pid)
+    case 'reject': return rejectProcess(state, action.pid)
     case 'admit-next': {
       const pending = state.processes.find(p => p.state === 'new')
       return pending ? admitProcess(state, pending.pid) : state
+    }
+    case 'reject-next': {
+      const pending = state.processes.find(p => p.state === 'new')
+      return pending ? rejectProcess(state, pending.pid) : state
     }
     case 'complete-slot': {
       const process = state.processes.filter(p => p.state === 'blocked')[action.slot]

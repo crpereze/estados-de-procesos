@@ -230,13 +230,22 @@ test('edge: all processes in non-executable states produce IDLE without corrupti
 
 test('allowed transitions match the five-state model exactly', () => {
   assert.ok(canTransition('new', 'ready'))
+  assert.ok(canTransition('new', 'terminated'))
   assert.ok(canTransition('ready', 'running'))
   assert.ok(canTransition('running', 'ready'))
   assert.ok(canTransition('running', 'blocked'))
   assert.ok(canTransition('running', 'terminated'))
   assert.ok(canTransition('blocked', 'ready'))
-  const forbidden = [['new', 'running'], ['new', 'blocked'], ['new', 'terminated'], ['ready', 'blocked'], ['ready', 'terminated'], ['blocked', 'running'], ['blocked', 'terminated'], ['terminated', 'ready'], ['terminated', 'running'], ['running', 'new']]
+  const forbidden = [['new', 'running'], ['new', 'blocked'], ['ready', 'blocked'], ['ready', 'terminated'], ['blocked', 'running'], ['blocked', 'terminated'], ['terminated', 'ready'], ['terminated', 'running'], ['running', 'new']]
   for (const [from, to] of forbidden) assert.equal(canTransition(from, to), false, `${from} -> ${to}`)
+})
+
+test('rejecting a new process transitions directly from Nuevo to Terminado', () => {
+  const state = session(process(101))
+  const rejected = act(state, 'reject', { pid: 101 })
+  assert.equal(rejected.processes[0].state, 'terminated')
+  assert.equal(rejected.completed, 1)
+  assert.deepEqual(rejected.processes[0].history, ['new', 'terminated'])
 })
 
 test('timing metrics average finished processes accurately', () => {

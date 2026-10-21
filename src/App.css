@@ -34,6 +34,36 @@ kbd{display:inline-block;min-width:23px;text-align:center;border:1px solid #4b4b
 .time-metrics>div>span{font-size:10px;color:#9a9aa6}
 .time-metrics>div>strong{display:block;margin-top:8px;font:500 21px ui-monospace,monospace;color:#cdd6e2;letter-spacing:-.5px}
 .time-metrics-note{grid-column:1/-1;border-top:1px solid #232329;padding-top:11px;margin-top:2px;font-size:10px;color:#7f7f8b}
+
+/* Trayectoria y Verificación de 5 Estados */
+.lifecycle-path{display:flex;align-items:center;gap:6px;font-size:9px;color:#a3a3b2;background:#101014;border:1px solid #282833;border-radius:5px;padding:4px 8px;margin-top:10px;overflow-x:auto}
+.lifecycle-path span{font-weight:600;color:#78bf92;flex-shrink:0}
+.lifecycle-path code{font:9px ui-monospace,monospace;color:#cdd6e2;white-space:nowrap}
+.admit-buttons{display:flex;gap:6px}
+.reject-btn{display:flex;align-items:center;justify-content:center;gap:4px;border:1px solid #5a3036;background:#32191d;color:#fca5a5;border-radius:5px;padding:6px 9px;font-size:11px}
+.reject-btn:hover{background:#452026;border-color:#7f3944}
+.workflow-step.terminated{border-color:#3f3f4a;background:#18181c}
+.verifier-panel{border:1px solid #28282f;border-radius:10px;padding:20px;background:#111114;margin-top:20px}
+.verifier-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px}
+.verifier-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.verifier-card{border:1px solid #2a2a33;background:#17171d;border-radius:8px;padding:14px}
+.verifier-card h3{font-size:12px;display:flex;align-items:center;gap:7px;margin-bottom:6px;color:#d8d8e2}
+.verifier-card p{font-size:11px;color:#9494a0;margin-bottom:10px}
+.verifier-badge{display:inline-flex;align-items:center;gap:5px;font:9px ui-monospace,monospace;background:#101a14;border:1px solid #254731;color:#75e5a0;border-radius:4px;padding:3px 7px}
+.verifier-logs{margin-top:10px;background:#0d0d10;border-radius:6px;padding:8px;font:9px ui-monospace,monospace;color:#a9a9b5;max-height:100px;overflow-y:auto}
+.verify-toggle{border-color:#2a4a35!important;color:#7ee0a5!important}
+@media(max-width:850px){.verifier-grid{grid-template-columns:1fr}}
 @media(max-width:1150px){.process-board{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:850px){.process-board{grid-template-columns:repeat(2,minmax(0,1fr))}.state-column.blocked{grid-column:auto}.state-column.blocked .process-list{display:flex;height:425px;max-height:none}}
 @media(max-width:560px){.process-board{grid-template-columns:1fr}.state-column.blocked{grid-column:auto}.time-metrics{grid-template-columns:1fr}}
+
+/* Compact action for new-process cards */
+.card-top{min-width:0}
+.state-label{min-width:0;white-space:nowrap}
+.card-reject{display:inline-grid;place-items:center;flex:0 0 24px;width:24px;height:24px;padding:0;margin-left:auto;border:1px solid #5a3036;border-radius:5px;background:#32191d;color:#fca5a5}
+.card-reject:hover{background:#452026;border-color:#7f3944;color:#ffc1c1}
+.card-reject:active{background:#281419}
+.card-reject svg{pointer-events:none}
+.process-card.new .admit-row>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.process-card.new .admit{flex-shrink:0}
+@media(max-width:1150px){.card-reject{width:22px;height:22px}.process-card.new .admit{padding-inline:8px}}
