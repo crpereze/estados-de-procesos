@@ -12,6 +12,7 @@ export function handleKeyboardCommand(event: {
   const key = event.key.toLowerCase()
   if (key === ' ') return { type: 'step' }
   if (key === 'i') return { type: 'request-io' }
+  if (key === 'a') return { type: 'admit-next' }
   if (key === 'n') return { type: 'add' }
   if (key === 'r') return { type: 'reset', value: Date.now() >>> 0 }
   if (/^[1-9]$/.test(key)) return { type: 'complete-slot', slot: Number(key) - 1 }
